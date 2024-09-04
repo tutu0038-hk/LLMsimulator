@@ -1,0 +1,39 @@
+syntax = "proto3";
+
+package communicator;
+
+message HelloRequest {
+  string name = 1;
+}
+
+message HelloReply {
+  string message = 1;
+}
+
+enum  CommunicationType{
+  Allgather = 0;
+  Allreduce = 1;
+  Alltoall = 2;
+  Barrier = 3;
+  Broadcast = 4;
+  Scatter = 5;
+  matrix = 6;
+}
+
+message CommunicatorInput{
+  int32  rank = 1;
+  double time = 2;
+  optional CommunicationType type = 3;
+}
+
+message CommunicatorOutput{
+  bool success = 1;
+}
+
+service Greeter {
+  // test
+  rpc SayHello (HelloRequest) returns (HelloReply) {}
+
+  //communicator
+  rpc communicator (CommunicatorInput) returns (CommunicatorOutput) {}
+}
