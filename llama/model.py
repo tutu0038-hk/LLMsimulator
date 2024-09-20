@@ -73,8 +73,9 @@ class RMSNorm(torch.nn.Module):
             torch.Tensor: The output tensor after applying RMSNorm.
 
         """
-        output = self._norm(x.float()).type_as(x)
-        return output * self.weight
+        #output = self._norm(x.float()).type_as(x)
+        #return output * self.weight
+        return x
 
 
 def precompute_freqs_cis(dim: int, end: int, theta: float = 10000.0):
@@ -108,7 +109,7 @@ def reshape_for_broadcast(freqs_cis: torch.Tensor, x: torch.Tensor):
     """
     Reshape frequency tensor for broadcasting it with another tensor.
 
-    This function reshapes the frequency tensor to have the same shape as the target tensor 'x'
+    This function reshapes the frequency tensor to have the same Fakeshape as the target tensor 'x'
     for the purpose of broadcasting the frequency tensor during element-wise operations.
 
     Args:
@@ -119,14 +120,15 @@ def reshape_for_broadcast(freqs_cis: torch.Tensor, x: torch.Tensor):
         torch.Tensor: Reshaped frequency tensor.
 
     Raises:
-        AssertionError: If the frequency tensor doesn't match the expected shape.
+        AssertionError: If the frequency tensor doesn't match the expected Fakeshape.
         AssertionError: If the target tensor 'x' doesn't have the expected number of dimensions.
     """
-    ndim = x.ndim
-    assert 0 <= 1 < ndim
-    assert freqs_cis.shape == (x.shape[1], x.shape[-1])
-    shape = [d if i == 1 or i == ndim - 1 else 1 for i, d in enumerate(x.shape)]
-    return freqs_cis.view(*shape)
+    ndim = len(x.Fakeshape)
+    #assert 0 <= 1 < ndim
+    #assert freqs_cis.Fakeshape == (x.Fakeshape[1], x.Fakeshape[-1])
+    Fakeshape = [d if i == 1 or i == ndim - 1 else 1 for i, d in enumerate(x.Fakeshape)]
+    #print("jiashu ", Fakeshape, " ", ndim)
+    return freqs_cis.view(*Fakeshape)
 
 
 def apply_rotary_emb(
@@ -153,8 +155,8 @@ def apply_rotary_emb(
         
 
     """
-    xq_ = torch.view_as_complex(xq.float().reshape(*xq.shape[:-1], -1, 2))
-    xk_ = torch.view_as_complex(xk.float().reshape(*xk.shape[:-1], -1, 2))
+    xq_ = torch.view_as_complex(xq.float().reshape(*xq.Fakeshape[:-1], -1, 2))
+    xk_ = torch.view_as_complex(xk.float().reshape(*xk.Fakeshape[:-1], -1, 2))
     freqs_cis = reshape_for_broadcast(freqs_cis, xq_)
     xq_out = torch.view_as_real(xq_ * freqs_cis).flatten(3)
     xk_out = torch.view_as_real(xk_ * freqs_cis).flatten(3)
@@ -163,7 +165,7 @@ def apply_rotary_emb(
 
 def repeat_kv(x: torch.Tensor, n_rep: int) -> torch.Tensor:
     """torch.repeat_interleave(x, dim=2, repeats=n_rep)"""
-    bs, slen, n_kv_heads, head_dim = x.shape
+    bs, slen, n_kv_heads, head_dim = x.Fakeshape
     if n_rep == 1:
         return x
     return (
@@ -271,48 +273,77 @@ class Attention(nn.Module):
 
         """
         time0 = time.time()
-        bsz, seqlen, _ = x.shape
+        bsz, seqlen, _ = x.Fakeshape
         xq, xk, xv = self.wq(x), self.wk(x), self.wv(x)
+        #print(x.Fakeshape)
 
-        time1 = time.time()
-        
-        #print("Time1 : ", time1 - time0)
+        #timenow = time.time()
+        #print("Time1 : ", timenow - time0)        
+        #time0 = timenow
         xq = xq.view(bsz, seqlen, self.n_local_heads, self.head_dim)
         xk = xk.view(bsz, seqlen, self.n_local_kv_heads, self.head_dim)
         xv = xv.view(bsz, seqlen, self.n_local_kv_heads, self.head_dim)
 
+        #print(xq.Fakeshape)
+        #timenow = time.time()
+        #print("Time2 : ", timenow - time0)        
+        #time0 = timenow
         xq, xk = apply_rotary_emb(xq, xk, freqs_cis=freqs_cis)
-
+        #print(xq.Fakeshape)
+        #timenow = time.time()
+        #print("Time3 : ", timenow - time0)        
+        #time0 = timenow
         self.cache_k = self.cache_k.to(xq)
         self.cache_v = self.cache_v.to(xq)
 
-        #0.0013
+        #timenow = time.time()
+        #print("Time4 : ", timenow - time0)        
+        #time0 = timenow
+        #print("test: ", xk.Fakeshape)
+        #print("cache_k: ", self.cache_k[:bsz, start_pos : start_pos + seqlen].Fakeshape)
+        #print("bsz= ", bsz, "start_pos = ", start_pos, "seqlen =", seqlen)
         self.cache_k[:bsz, start_pos : start_pos + seqlen] = xk
         self.cache_v[:bsz, start_pos : start_pos + seqlen] = xv
 
-        time2 = time.time()
-        #print("Time2 : ", time2 - time1)
+        #timenow = time.time()
+        #print("Time5 : ", timenow - time0)        
+        #time0 = timenow
+
         keys = self.cache_k[:bsz, : start_pos + seqlen]
         values = self.cache_v[:bsz, : start_pos + seqlen]
-        
+        #timenow = time.time()
+        #print("Time6 : ", timenow - time0)        
+        #time0 = timenow
         # repeat k/v heads if n_kv_heads < n_heads
+        #print("keys = " , keys.Fakeshape)
         keys = repeat_kv(keys, self.n_rep)  # (bs, cache_len + seqlen, n_local_heads, head_dim)
         values = repeat_kv(values, self.n_rep)  # (bs, cache_len + seqlen, n_local_heads, head_dim)
-
+        #timenow = time.time()
+        #print("Time7 : ", timenow - time0)        
+        #time0 = timenow
         xq = xq.transpose(1, 2)  # (bs, n_local_heads, seqlen, head_dim)
         keys = keys.transpose(1, 2) # (bs, n_local_heads, cache_len + seqlen, head_dim)
         values = values.transpose(1, 2) # (bs, n_local_heads, cache_len + seqlen, head_dim)
         scores = torch.matmul(xq, keys.transpose(2, 3)) / math.sqrt(self.head_dim)
+        
+        #timenow = time.time()
+        #print("Time8 : ", timenow - time0)        
+        #time0 = timenow
         if mask is not None:
             scores = scores + mask  # (bs, n_local_heads, seqlen, cache_len + seqlen)
 
-        time3 = time.time()
-        #print("Time3: ", time3 - time2)
         scores = F.softmax(scores.float(), dim=-1).type_as(xq)
+        #timenow = time.time()
+        #print("Time9 : ", timenow - time0)        
+        #time0 = timenow
         output = torch.matmul(scores, values)  # (bs, n_local_heads, seqlen, head_dim)
+        #timenow = time.time()
+        #print("Time10 : ", timenow - time0)        
+        #time0 = timenow
         output = output.transpose(1, 2).contiguous().view(bsz, seqlen, -1)
-        #print("Time4: ", time.time() - time3)
-        #print("Total: ", time.time() - time0)
+        #timenow = time.time()
+        #print("Time11 : ", timenow - time0)        
+        #time0 = timenow
         return self.wo(output)
 
 
@@ -478,10 +509,13 @@ class Transformer(nn.Module):
             torch.Tensor: Output logits after applying the Transformer model.
 
         """
-        _bsz, seqlen = tokens.shape
+        _bsz, seqlen = tokens.Fakeshape
         h = self.tok_embeddings(tokens)
         self.freqs_cis = self.freqs_cis.to(h.device)
         freqs_cis = self.freqs_cis[start_pos : start_pos + seqlen]
+
+        #print("t1", freqs_cis.Fakeshape)
+        #print("t2", h.Fakeshape)
 
         mask = None
         if seqlen > 1:

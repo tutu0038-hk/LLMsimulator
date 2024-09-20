@@ -131,9 +131,9 @@ class Llama:
         )
         tokenizer = Tokenizer(model_path=tokenizer_path)
         model_args.vocab_size = tokenizer.n_words
-        print(tokenizer.n_words)
-        print(model_args.dim)
-        print(model_args.multiple_of)
+        #print(tokenizer.n_words)
+        #print(model_args.dim)
+        #print(model_args.multiple_of)
         #torch.set_default_tensor_type(torch.cpu.HalfTensor)
         
         model = Transformer(model_args)
@@ -176,6 +176,7 @@ class Llama:
             If logprobs is True, token log probabilities are computed for each generated token.
 
         """
+        
         params = self.model.params
         bsz = len(prompt_tokens)
         assert bsz <= params.max_batch_size, (bsz, params.max_batch_size)
@@ -220,41 +221,43 @@ class Llama:
         cnt = 0
         for cur_pos in range(min_prompt_len, total_len):
             time0 = time.time()
-            #mode = FakeTensorMode(allow_non_fake_inputs = True) 
-            #input = mode.from_tensor(tokens[:, prev_pos:cur_pos])
-            logits = self.model.forward(tokens[:, prev_pos:cur_pos], prev_pos)        
+            mode = ReplaceTensor.mode
+            input = mode.from_tensor(tokens[:, prev_pos:cur_pos].shape)
+            #print(input.Fakeshape)
+            logits = self.model.forward(input, prev_pos)        
             ReplaceTensor.clearpool()
             cnt += 1
             time1 = time.time()
-            print("Done", time1 - time0)
-            if temperature > 0:
-                probs = torch.softmax(logits[:, -1] / temperature, dim=-1)
-                next_token = sample_top_p(probs, top_p)
-            else:
-                next_token = torch.argmax(logits[:, -1], dim=-1)
+            #print("Done", time1 - time0)
+            # if temperature > 0:
+            #     probs = torch.softmax(logits[:, -1] / temperature, dim=-1)
+            #     next_token = sample_top_p(probs, top_p)
+            # else:
+            next_token = torch.argmax(logits[:, -1], dim=-1)
 
-            next_token = next_token.reshape(-1)
-            # only replace token if prompt has already been generated
-            next_token = torch.where(
-                input_text_mask[:, cur_pos], tokens[:, cur_pos], next_token
-            )
+            #print(logits[:, -1].Fakeshape)
+            # next_token = next_token.reshape(-1)
+            # # only replace token if prompt has already been generated
+            # next_token = torch.where(
+            #     input_text_mask[:, cur_pos], tokens[:, cur_pos], next_token
+            # )
             tokens[:, cur_pos] = next_token
-            if logprobs:
-                token_logprobs[:, prev_pos + 1 : cur_pos + 1] = -F.cross_entropy(
-                    input=logits.transpose(1, 2),
-                    target=tokens[:, prev_pos + 1 : cur_pos + 1],
-                    reduction="none",
-                    ignore_index=pad_id,
-                )
-            eos_reached |= (~input_text_mask[:, cur_pos]) & (
-                next_token == self.tokenizer.eos_id
-            )
+            # if logprobs:
+            #     token_logprobs[:, prev_pos + 1 : cur_pos + 1] = -F.cross_entropy(
+            #         input=logits.transpose(1, 2),
+            #         target=tokens[:, prev_pos + 1 : cur_pos + 1],
+            #         reduction="none",
+            #         ignore_index=pad_id,
+            #     )
+            # eos_reached |= (~input_text_mask[:, cur_pos]) & (
+            #     next_token == self.tokenizer.eos_id
+            # )
             prev_pos = cur_pos
-            if all(eos_reached):
-                break
+            # if all(eos_reached):
+            #     break
 
-        if logprobs:
-            token_logprobs = token_logprobs.tolist()
+        # if logprobs:
+        #     token_logprobs = token_logprobs.tolist()
         out_tokens, out_logprobs = [], []
         for i, toks in enumerate(tokens.tolist()):
             # cut to max gen len
@@ -274,6 +277,7 @@ class Llama:
 
         ReplaceTensor.clearpool()
         print("All Done", time.time() - timest)
+        print(ReplaceTensor.Trace)
         return (out_tokens, out_logprobs if logprobs else None)
 
     def text_completion(
